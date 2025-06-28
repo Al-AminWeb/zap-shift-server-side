@@ -26,10 +26,87 @@ async function run() {
         const db = client.db('parcelDB');
         const parcelCollection = db.collection('parcels');
 
-        app.get('/parcels', async  (req, res) => {
+        app.get('/parcels', async (req, res) => {
             const parcels = await parcelCollection.find().toArray();
             res.send(parcels);
         })
+
+        /* ----------  POST a new parcel  ---------- */
+        app.post('/parcels', async (req, res) => {
+            try {
+                /* ── 1. Basic validation ── */
+                const required = [
+                    'type',
+                    'title',
+                    'senderName',
+                    'senderContact',
+                    'senderEmail',
+                    'senderRegion',
+                    'senderCenter',
+                    'senderAddress',
+                    'pickupInstruction',
+                    'receiverName',
+                    'receiverContact',
+                    'receiverRegion',
+                    'receiverCenter',
+                    'receiverAddress',
+                    'deliveryInstruction',
+                    'createdBy'
+                ];
+                const missing = required.filter(k => !req.body?.[k]);
+                if (missing.length) {
+                    return res
+                        .status(400)
+                        .json({error: `Missing required fields: ${missing.join(', ')}`});
+                }
+
+                /* ── 2. Attach server‑trusted timestamps ── */
+                const now = Date.now();                      //Unix (ms)
+                const parcelDoc = {
+                    ...req.body,
+                    createdAtUnix: now,
+                    createdAtISO: new Date(now).toISOString()
+                };
+
+                /* ── 3. Save to MongoDB ── */
+                const result = await parcelCollection.insertOne(parcelDoc);
+
+                /* ── 4. Respond ── */
+                res.status(201).json({
+                    message: 'Parcel saved successfully.',
+                    insertedId: result.insertedId
+                });
+            } catch (err) {
+                console.error('❌  Failed to save parcel:', err);
+                res
+                    .status(500)
+                    .json({error: 'Something went wrong while saving the parcel.'});
+            }
+        });
+
+        /* ----------  GET /parcels — all or by user, sorted by ISO date ---------- */
+        app.get('/parcels', async (req, res) => {
+            try {
+                const filter = {};
+
+                // Optional: filter by user e‑mail via createdBy field
+                if (req.query.createdBy) {
+                    filter.createdBy = req.query.createdBy;
+                }
+
+                // Fetch parcels sorted by createdAtISO (latest first)
+                const parcels = await parcelCollection
+                    .find(filter)
+                    .sort({ createdAtISO: -1 })  // ISO strings sort chronologically
+                    .toArray();
+
+                res.json(parcels);
+            } catch (err) {
+                console.error('❌ Error fetching parcels:', err);
+                res.status(500).json({ error: 'Failed to fetch parcel data.' });
+            }
+        });
+
 
         await client.db("admin").command({ping: 1});
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
