@@ -108,6 +108,31 @@ async function run() {
         });
 
 
+        const { ObjectId } = require('mongodb'); // 👈 Required at the top
+
+        app.delete('/parcels/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
+
+                // Validate ObjectId
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).json({ error: 'Invalid parcel ID.' });
+                }
+
+                const result = await parcelCollection.deleteOne({ _id: new ObjectId(id) });
+
+                if (result.deletedCount === 0) {
+                    return res.status(404).json({ error: 'Parcel not found.' });
+                }
+
+                res.json({ message: 'Parcel deleted successfully.' });
+            } catch (err) {
+                console.error('❌ Error deleting parcel:', err);
+                res.status(500).json({ error: 'Failed to delete parcel.' });
+            }
+        });
+
+
         await client.db("admin").command({ping: 1});
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
