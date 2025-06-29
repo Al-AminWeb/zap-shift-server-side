@@ -154,44 +154,42 @@ async function run() {
 
         app.post('/payments', async (req, res) => {
             try {
-                const {parcelId, amount, paymentMethod, txId} = req.body;
-
-                /* ── Validate ── */
+                const { parcelId, amount, paymentMethod, transactionId  } = req.body;
 
                 if (!ObjectId.isValid(parcelId)) {
-                    return res.status(400).json({error: 'Invalid parcelId.'});
+                    return res.status(400).json({ error: 'Invalid parcelId.' });
                 }
 
-                /* ── 1. Make sure parcel exists & is unpaid ── */
-                const parcel = await parcelCollection.findOne({_id: new ObjectId(parcelId)});
-                if (!parcel) return res.status(404).json({error: 'Parcel not found.'});
+                // ✅ Fetch parcel to get user info (createdBy)
+                const parcel = await parcelCollection.findOne({ _id: new ObjectId(parcelId) });
+                if (!parcel) return res.status(404).json({ error: 'Parcel not found.' });
+
                 if (parcel.paymentStatus === 'Paid') {
-                    return res.status(409).json({error: 'Parcel already marked as Paid.'});
+                    return res.status(409).json({ error: 'Parcel already marked as Paid.' });
                 }
 
-                /* ── 2. Insert payment record ── */
                 const now = Date.now();
                 const paymentDoc = {
                     parcelId: new ObjectId(parcelId),
                     amount,
                     paymentMethod,
-                    txId: txId || null,
+                    txId: transactionId  || null,
                     status: 'Paid',
-
                     createdAtISO: new Date(now).toISOString(),
-                    createdAtUnix: now
+                    createdAtUnix: now,
+                    createdBy: parcel.createdBy || null   // ✅ ADD THIS LINE
                 };
+
                 const payResult = await paymentCollection.insertOne(paymentDoc);
 
-                /* ── 3. Update parcel ── */
                 await parcelCollection.updateOne(
-                    {_id: new ObjectId(parcelId)},
+                    { _id: new ObjectId(parcelId) },
                     {
                         $set: {
                             paymentStatus: 'Paid',
                             paymentAtISO: paymentDoc.createdAtISO,
                             paymentAtUnix: paymentDoc.createdAtUnix,
-                            paymentId: payResult.insertedId   // optional back‑reference
+                            paymentId: payResult.insertedId
                         }
                     }
                 );
@@ -200,11 +198,13 @@ async function run() {
                     message: 'Payment recorded & parcel marked as Paid.',
                     paymentId: payResult.insertedId
                 });
+
             } catch (err) {
                 console.error('❌ Error posting payment:', err);
-                res.status(500).json({error: 'Failed to record payment.'});
+                res.status(500).json({ error: 'Failed to record payment.' });
             }
         });
+
 
         app.get('/payments', async (req, res) => {
             try {
