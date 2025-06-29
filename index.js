@@ -1,3 +1,4 @@
+const {ObjectId} = require('mongodb');
 const express = require('express');
 const {MongoClient, ServerApiVersion} = require('mongodb');
 const cors = require('cors');
@@ -6,6 +7,7 @@ const app = express();
 dotenv.config();
 const port = process.env.PORT || 3000;
 
+const stripe = require('stripe')(process.env.PAYMENT_GATEWAY_KEY);
 
 app.use(cors());
 app.use(express.json());
@@ -51,7 +53,8 @@ async function run() {
                     'receiverCenter',
                     'receiverAddress',
                     'deliveryInstruction',
-                    'createdBy'
+                    'createdBy',
+                    'cost'
                 ];
                 const missing = required.filter(k => !req.body?.[k]);
                 if (missing.length) {
@@ -97,18 +100,34 @@ async function run() {
                 // Fetch parcels sorted by createdAtISO (latest first)
                 const parcels = await parcelCollection
                     .find(filter)
-                    .sort({ createdAtISO: -1 })  // ISO strings sort chronologically
+                    .sort({createdAtISO: -1})  // ISO strings sort chronologically
                     .toArray();
 
                 res.json(parcels);
             } catch (err) {
                 console.error('❌ Error fetching parcels:', err);
-                res.status(500).json({ error: 'Failed to fetch parcel data.' });
+                res.status(500).json({error: 'Failed to fetch parcel data.'});
             }
         });
 
+        app.get('/parcels/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
+                // 2️⃣ Query MongoDB by _id
+                const parcel = await parcelCollection.findOne({_id: new ObjectId(id)});
 
-        const { ObjectId } = require('mongodb'); // 👈 Required at the top
+                // 3️⃣ Handle not found
+                if (!parcel) {
+                    return res.status(404).json({error: 'Parcel not found.'});
+                }
+
+                // 4️⃣ Success
+                res.json(parcel);
+            } catch (err) {
+                console.error('❌ Error fetching parcel by ID:', err);
+                res.status(500).json({error: 'Failed to fetch parcel.'});
+            }
+        });
 
         app.delete('/parcels/:id', async (req, res) => {
             try {
@@ -116,22 +135,36 @@ async function run() {
 
                 // Validate ObjectId
                 if (!ObjectId.isValid(id)) {
-                    return res.status(400).json({ error: 'Invalid parcel ID.' });
+                    return res.status(400).json({error: 'Invalid parcel ID.'});
                 }
 
-                const result = await parcelCollection.deleteOne({ _id: new ObjectId(id) });
+                const result = await parcelCollection.deleteOne({_id: new ObjectId(id)});
 
                 if (result.deletedCount === 0) {
-                    return res.status(404).json({ error: 'Parcel not found.' });
+                    return res.status(404).json({error: 'Parcel not found.'});
                 }
 
-                res.json({ message: 'Parcel deleted successfully.' });
+                res.json({message: 'Parcel deleted successfully.'});
             } catch (err) {
                 console.error('❌ Error deleting parcel:', err);
-                res.status(500).json({ error: 'Failed to delete parcel.' });
+                res.status(500).json({error: 'Failed to delete parcel.'});
             }
         });
 
+        app.post('/create-payment-intent', async (req, res) => {
+            const amountInCents = req.body.amountInCents;
+            try{
+                const paymentIntent = await stripe.paymentIntents.create({
+                    amount:amountInCents,
+                    currency:'usd',
+                    payment_method_types:['card'],
+                });
+                res.json({clientSecret: paymentIntent.client_secret});
+            }
+            catch(err){
+                res.status(500).json({error: err.message});
+            }
+        })
 
         await client.db("admin").command({ping: 1});
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
