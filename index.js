@@ -27,6 +27,7 @@ async function run() {
     try {
         const db = client.db('parcelDB');
         const parcelCollection = db.collection('parcels');
+        const paymentCollection = db.collection('payments');
 
         app.get('/parcels', async (req, res) => {
             const parcels = await parcelCollection.find().toArray();
@@ -151,17 +152,87 @@ async function run() {
             }
         });
 
+        app.post('/payments', async (req, res) => {
+            try {
+                const {parcelId, amount, paymentMethod, txId} = req.body;
+
+                /* ── Validate ── */
+
+                if (!ObjectId.isValid(parcelId)) {
+                    return res.status(400).json({error: 'Invalid parcelId.'});
+                }
+
+                /* ── 1. Make sure parcel exists & is unpaid ── */
+                const parcel = await parcelCollection.findOne({_id: new ObjectId(parcelId)});
+                if (!parcel) return res.status(404).json({error: 'Parcel not found.'});
+                if (parcel.paymentStatus === 'Paid') {
+                    return res.status(409).json({error: 'Parcel already marked as Paid.'});
+                }
+
+                /* ── 2. Insert payment record ── */
+                const now = Date.now();
+                const paymentDoc = {
+                    parcelId: new ObjectId(parcelId),
+                    amount,
+                    paymentMethod,
+                    txId: txId || null,
+                    status: 'Paid',
+
+                    createdAtISO: new Date(now).toISOString(),
+                    createdAtUnix: now
+                };
+                const payResult = await paymentCollection.insertOne(paymentDoc);
+
+                /* ── 3. Update parcel ── */
+                await parcelCollection.updateOne(
+                    {_id: new ObjectId(parcelId)},
+                    {
+                        $set: {
+                            paymentStatus: 'Paid',
+                            paymentAtISO: paymentDoc.createdAtISO,
+                            paymentAtUnix: paymentDoc.createdAtUnix,
+                            paymentId: payResult.insertedId   // optional back‑reference
+                        }
+                    }
+                );
+
+                res.status(201).json({
+                    message: 'Payment recorded & parcel marked as Paid.',
+                    paymentId: payResult.insertedId
+                });
+            } catch (err) {
+                console.error('❌ Error posting payment:', err);
+                res.status(500).json({error: 'Failed to record payment.'});
+            }
+        });
+
+        app.get('/payments', async (req, res) => {
+            try {
+                const filter = {};
+                if (req.query.createdBy) filter.createdBy = req.query.createdBy;
+
+                const payments = await paymentCollection
+                    .find(filter)
+                    .sort({ createdAtISO: -1 })    // newest → oldest
+                    .toArray();
+
+                res.json(payments);
+            } catch (err) {
+                console.error('❌ Error fetching payments:', err);
+                res.status(500).json({ error: 'Failed to load payment history.' });
+            }
+        });
+
         app.post('/create-payment-intent', async (req, res) => {
             const amountInCents = req.body.amountInCents;
-            try{
+            try {
                 const paymentIntent = await stripe.paymentIntents.create({
-                    amount:amountInCents,
-                    currency:'usd',
-                    payment_method_types:['card'],
+                    amount: amountInCents,
+                    currency: 'usd',
+                    payment_method_types: ['card'],
                 });
                 res.json({clientSecret: paymentIntent.client_secret});
-            }
-            catch(err){
+            } catch (err) {
                 res.status(500).json({error: err.message});
             }
         })
