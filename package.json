@@ -14,7 +14,9 @@
     "cors": "^2.8.5",
     "dotenv": "^17.0.0",
     "express": "^5.1.0",
+    "firebase-admin": "^13.4.0",
     "mongodb": "^6.17.0",
+    "react-router": "^7.6.3",
     "stripe": "^18.2.1"
   }
 }

@@ -4,6 +4,7 @@ const {MongoClient, ServerApiVersion} = require('mongodb');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const app = express();
+const admin = require("firebase-admin");
 dotenv.config();
 const port = process.env.PORT || 3000;
 
@@ -11,6 +12,13 @@ const stripe = require('stripe')(process.env.PAYMENT_GATEWAY_KEY);
 
 app.use(cors());
 app.use(express.json());
+
+
+const serviceAccount = require("./firebase-admin-key.json");
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
 
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.9c3lw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
@@ -26,13 +34,69 @@ const client = new MongoClient(uri, {
 async function run() {
     try {
         const db = client.db('parcelDB');
+        const userCollection = db.collection('users');
         const parcelCollection = db.collection('parcels');
         const paymentCollection = db.collection('payments');
+        const ridersCollection = db.collection('riders');
+
+        const verifyFBToken = async (req, res, next) => {
+            const authHeader = req.headers.authorization;
+            if (!authHeader) {
+                return res.status(401).send({message: 'Not authorized'});
+            }
+            const token = authHeader.split(' ')[1];
+            if (!token) {
+                return res.status(401).send({message: 'Not authorized'});
+            }
+
+            try {
+                const decoded = await admin.auth().verifyIdToken(token);
+                req.decoded = decoded;
+            }
+            catch (error) {
+                return res.status(403).send({message: 'forbidden access'});
+            }
+            next()
+        }
+
+
+        app.post('/user', async (req, res) => {
+            const email = req.body.email;
+            const userExist = await userCollection.findOne({email});
+            if (userExist) {
+                return res.status(200).send({message: 'user already exists', inserted: false});
+            }
+            const user = req.body;
+            const result = await userCollection.insertOne(user);
+            res.send(result);
+        })
+
+        // app.get('/parcels', async (req, res) => {
+        //     const parcels = await parcelCollection.find().toArray();
+        //     res.send(parcels);
+        // })
 
         app.get('/parcels', async (req, res) => {
-            const parcels = await parcelCollection.find().toArray();
-            res.send(parcels);
-        })
+            try {
+                const filter = {};
+
+                // Optional: filter by user e‑mail via createdBy field
+                if (req.query.createdBy) {
+                    filter.createdBy = req.query.createdBy;
+                }
+
+                // Fetch parcels sorted by createdAtISO (latest first)
+                const parcels = await parcelCollection
+                    .find(filter)
+                    .sort({createdAtISO: -1})  // ISO strings sort chronologically
+                    .toArray();
+
+                res.json(parcels);
+            } catch (err) {
+                console.error('❌ Error fetching parcels:', err);
+                res.status(500).json({error: 'Failed to fetch parcel data.'});
+            }
+        });
 
         /* ----------  POST a new parcel  ---------- */
         app.post('/parcels', async (req, res) => {
@@ -88,28 +152,8 @@ async function run() {
             }
         });
 
-        /* ----------  GET /parcels — all or by user, sorted by ISO date ---------- */
-        app.get('/parcels', async (req, res) => {
-            try {
-                const filter = {};
+        /* ---------- GET /parcels — all or by user, sorted by ISO date ---------- */
 
-                // Optional: filter by user e‑mail via createdBy field
-                if (req.query.createdBy) {
-                    filter.createdBy = req.query.createdBy;
-                }
-
-                // Fetch parcels sorted by createdAtISO (latest first)
-                const parcels = await parcelCollection
-                    .find(filter)
-                    .sort({createdAtISO: -1})  // ISO strings sort chronologically
-                    .toArray();
-
-                res.json(parcels);
-            } catch (err) {
-                console.error('❌ Error fetching parcels:', err);
-                res.status(500).json({error: 'Failed to fetch parcel data.'});
-            }
-        });
 
         app.get('/parcels/:id', async (req, res) => {
             try {
@@ -152,20 +196,86 @@ async function run() {
             }
         });
 
+
+        app.post('/riders', async (req, res) => {
+            const rider = req.body;
+            const result = await ridersCollection.insertOne(rider)
+            res.send(result);
+        })
+
+        // GET /riders/pending
+        app.get('/riders/pending', async (req, res) => {
+            try {
+                const pendingRiders = await ridersCollection
+                    .find({ status: 'pending' })
+                    .toArray();
+
+                res.json(pendingRiders);
+            } catch (error) {
+                console.error('Error fetching pending riders:', error);
+                res.status(500).json({ error: 'Failed to load pending rider applications' });
+            }
+        });
+
+        // PATCH /riders/:id
+        app.patch('/riders/:id', async (req, res) => {
+            await ridersCollection.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { status: req.body.status } }
+            );
+            res.json({ ok: true });
+        });
+
+        // Assuming you're using Express and have connected to MongoDB
+        app.get('/riders/active', async (req, res) => {
+            try {
+                const activeRiders = await db.collection('riders')
+                    .find({ status: 'approved' })
+                    .toArray();
+
+                res.json(activeRiders);
+            } catch (err) {
+                console.error('❌ Error loading active riders:', err);
+                res.status(500).json({ error: 'Failed to fetch active riders' });
+            }
+        });
+
+        app.patch('/riders/:id', async (req, res) => {
+            try {
+                const riderId = req.params.id;
+                const { status } = req.body;
+
+                const result = await db.collection('riders').updateOne(
+                    { _id: new ObjectId(riderId) },
+                    { $set: { status: status || 'inactive' } }
+                );
+
+                if (result.modifiedCount === 1) {
+                    res.json({ message: 'Rider status updated successfully' });
+                } else {
+                    res.status(404).json({ error: 'Rider not found or already updated' });
+                }
+            } catch (err) {
+                console.error('❌ Error updating rider status:', err);
+                res.status(500).json({ error: 'Failed to update rider' });
+            }
+        });
+
+
         app.post('/payments', async (req, res) => {
             try {
-                const { parcelId, amount, paymentMethod, transactionId  } = req.body;
+                const {parcelId, amount, paymentMethod, transactionId} = req.body;
 
                 if (!ObjectId.isValid(parcelId)) {
-                    return res.status(400).json({ error: 'Invalid parcelId.' });
+                    return res.status(400).json({error: 'Invalid parcelId.'});
                 }
 
                 // ✅ Fetch parcel to get user info (createdBy)
-                const parcel = await parcelCollection.findOne({ _id: new ObjectId(parcelId) });
-                if (!parcel) return res.status(404).json({ error: 'Parcel not found.' });
+                const parcel = await parcelCollection.findOne({_id: new ObjectId(parcelId)});
+                if (!parcel) return res.status(404).json({error: 'Parcel not found.'});
 
                 if (parcel.paymentStatus === 'Paid') {
-                    return res.status(409).json({ error: 'Parcel already marked as Paid.' });
+                    return res.status(409).json({error: 'Parcel already marked as Paid.'});
                 }
 
                 const now = Date.now();
@@ -173,7 +283,7 @@ async function run() {
                     parcelId: new ObjectId(parcelId),
                     amount,
                     paymentMethod,
-                    txId: transactionId  || null,
+                    txId: transactionId || null,
                     status: 'Paid',
                     createdAtISO: new Date(now).toISOString(),
                     createdAtUnix: now,
@@ -183,7 +293,7 @@ async function run() {
                 const payResult = await paymentCollection.insertOne(paymentDoc);
 
                 await parcelCollection.updateOne(
-                    { _id: new ObjectId(parcelId) },
+                    {_id: new ObjectId(parcelId)},
                     {
                         $set: {
                             paymentStatus: 'Paid',
@@ -201,25 +311,25 @@ async function run() {
 
             } catch (err) {
                 console.error('❌ Error posting payment:', err);
-                res.status(500).json({ error: 'Failed to record payment.' });
+                res.status(500).json({error: 'Failed to record payment.'});
             }
         });
 
 
-        app.get('/payments', async (req, res) => {
+        app.get('/payments', verifyFBToken, async (req, res) => {
             try {
                 const filter = {};
                 if (req.query.createdBy) filter.createdBy = req.query.createdBy;
 
                 const payments = await paymentCollection
                     .find(filter)
-                    .sort({ createdAtISO: -1 })    // newest → oldest
+                    .sort({createdAtISO: -1})    // newest → oldest
                     .toArray();
 
                 res.json(payments);
             } catch (err) {
                 console.error('❌ Error fetching payments:', err);
-                res.status(500).json({ error: 'Failed to load payment history.' });
+                res.status(500).json({error: 'Failed to load payment history.'});
             }
         });
 
