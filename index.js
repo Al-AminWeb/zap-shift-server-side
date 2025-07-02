@@ -203,6 +203,14 @@ async function run() {
             res.send(result);
         })
 
+        app.patch('/riders/:id', async (req, res) => {
+            await ridersCollection.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { status: req.body.status } }
+            );
+            res.json({ ok: true });
+        });
+
         // GET /riders/pending
         app.get('/riders/pending', async (req, res) => {
             try {
@@ -215,15 +223,6 @@ async function run() {
                 console.error('Error fetching pending riders:', error);
                 res.status(500).json({ error: 'Failed to load pending rider applications' });
             }
-        });
-
-        // PATCH /riders/:id
-        app.patch('/riders/:id', async (req, res) => {
-            await ridersCollection.updateOne(
-                { _id: new ObjectId(req.params.id) },
-                { $set: { status: req.body.status } }
-            );
-            res.json({ ok: true });
         });
 
         // Assuming you're using Express and have connected to MongoDB
@@ -240,27 +239,59 @@ async function run() {
             }
         });
 
-        app.patch('/riders/:id', async (req, res) => {
-            try {
-                const riderId = req.params.id;
-                const { status } = req.body;
+        // PATCH /riders/:id
+        // app.patch('/riders/:id', async (req, res) => {
+        //     try {
+        //         const riderId = req.params.id;
+        //         const { status } = req.body;
+        //
+        //         const result = await db.collection('riders').updateOne(
+        //             { _id: new ObjectId(riderId) },
+        //             { $set: { status: status || 'inactive' } }
+        //         );
+        //
+        //         if (result.modifiedCount === 1) {
+        //             res.json({ message: 'Rider status updated successfully' });
+        //         } else {
+        //             res.status(404).json({ error: 'Rider not found or already updated' });
+        //         }
+        //     } catch (err) {
+        //         console.error('❌ Error updating rider status:', err);
+        //         res.status(500).json({ error: 'Failed to update rider' });
+        //     }
+        // });
 
-                const result = await db.collection('riders').updateOne(
-                    { _id: new ObjectId(riderId) },
-                    { $set: { status: status || 'inactive' } }
+        // riders status
+        app.patch('/riders/:id/status', async (req, res) => {
+            try {
+                const { id } = req.params;
+                const { status, email } = req.body;
+                if (!status) return res.status(400).json({ error: 'Status required' });
+
+                const result = await ridersCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $set: { status } }
                 );
 
+                /* promote user role if rider is approved */
+                if (status === 'approved' && email) {
+                    await userCollection.updateOne(
+                        { email },
+                        { $set: { role: 'rider' } }
+                    );
+                }
+
                 if (result.modifiedCount === 1) {
-                    res.json({ message: 'Rider status updated successfully' });
+                    res.json({ message: 'Status updated' });
+
                 } else {
                     res.status(404).json({ error: 'Rider not found or already updated' });
                 }
             } catch (err) {
-                console.error('❌ Error updating rider status:', err);
-                res.status(500).json({ error: 'Failed to update rider' });
+                console.error(err);
+                res.status(500).json({ error: 'Failed to update rider status' });
             }
         });
-
 
         app.post('/payments', async (req, res) => {
             try {
