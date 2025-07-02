@@ -71,10 +71,53 @@ async function run() {
             res.send(result);
         })
 
-        // app.get('/parcels', async (req, res) => {
-        //     const parcels = await parcelCollection.find().toArray();
-        //     res.send(parcels);
-        // })
+        app.get('/users/search', async (req, res) => {
+            try {
+                const { q = '' } = req.query;          // text typed by admin
+
+                if (!q.trim()) {                       // if search box is empty
+                    return res.json([]);                 // return empty list
+                }
+
+                const users = await userCollection
+                    .find(
+                        { email: { $regex: q.trim(), $options: 'i' } },     // email contains q
+                        { projection: { email: 1, role: 1, created_at: 1 } }
+                    )
+                    .limit(20)                                            // at most 20 results
+                    .toArray();
+
+                res.json(users);
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ error: 'Search failed' });
+            }
+        });
+
+        app.patch('/users/:id/role', async (req, res) => {
+            try {
+                const { id }      = req.params;        // Mongo _id string
+                const { role }    = req.body;          // "admin" or "user"
+
+                if (!['admin', 'user'].includes(role)) {
+                    return res.status(400).json({ error: 'role must be "admin" or "user"' });
+                }
+
+                const result = await userCollection.updateOne(
+                    { _id: new ObjectId(id) },           // which user?
+                    { $set: { role } }                   // set new role
+                );
+
+                if (result.modifiedCount === 1) {
+                    res.json({ message: `Role set to ${role}` });
+                } else {
+                    res.status(404).json({ error: 'User not found' });
+                }
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ error: 'Failed to update role' });
+            }
+        });
 
         app.get('/parcels', async (req, res) => {
             try {
@@ -153,7 +196,6 @@ async function run() {
         });
 
         /* ---------- GET /parcels — all or by user, sorted by ISO date ---------- */
-
 
         app.get('/parcels/:id', async (req, res) => {
             try {
@@ -239,27 +281,6 @@ async function run() {
             }
         });
 
-        // PATCH /riders/:id
-        // app.patch('/riders/:id', async (req, res) => {
-        //     try {
-        //         const riderId = req.params.id;
-        //         const { status } = req.body;
-        //
-        //         const result = await db.collection('riders').updateOne(
-        //             { _id: new ObjectId(riderId) },
-        //             { $set: { status: status || 'inactive' } }
-        //         );
-        //
-        //         if (result.modifiedCount === 1) {
-        //             res.json({ message: 'Rider status updated successfully' });
-        //         } else {
-        //             res.status(404).json({ error: 'Rider not found or already updated' });
-        //         }
-        //     } catch (err) {
-        //         console.error('❌ Error updating rider status:', err);
-        //         res.status(500).json({ error: 'Failed to update rider' });
-        //     }
-        // });
 
         // riders status
         app.patch('/riders/:id/status', async (req, res) => {
