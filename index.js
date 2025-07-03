@@ -25,9 +25,7 @@ const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster
 
 const client = new MongoClient(uri, {
     serverApi: {
-        version: ServerApiVersion.v1,
-        strict: true,
-        deprecationErrors: true,
+        version: ServerApiVersion.v1, strict: true, deprecationErrors: true,
     }
 });
 
@@ -52,8 +50,7 @@ async function run() {
             try {
                 const decoded = await admin.auth().verifyIdToken(token);
                 req.decoded = decoded;
-            }
-            catch (error) {
+            } catch (error) {
                 return res.status(403).send({message: 'forbidden access'});
             }
             next()
@@ -73,52 +70,78 @@ async function run() {
 
         app.get('/users/search', async (req, res) => {
             try {
-                const { q = '' } = req.query;          // text typed by admin
+                const {q = ''} = req.query;          // text typed by admin
 
                 if (!q.trim()) {                       // if search box is empty
                     return res.json([]);                 // return empty list
                 }
 
                 const users = await userCollection
-                    .find(
-                        { email: { $regex: q.trim(), $options: 'i' } },     // email contains q
-                        { projection: { email: 1, role: 1, created_at: 1 } }
-                    )
+                    .find({email: {$regex: q.trim(), $options: 'i'}},     // email contains q
+                        {projection: {email: 1, role: 1, created_at: 1}})
                     .limit(20)                                            // at most 20 results
                     .toArray();
 
                 res.json(users);
             } catch (err) {
                 console.error(err);
-                res.status(500).json({ error: 'Search failed' });
+                res.status(500).json({error: 'Search failed'});
             }
         });
 
         app.patch('/users/:id/role', async (req, res) => {
             try {
-                const { id }      = req.params;        // Mongo _id string
-                const { role }    = req.body;          // "admin" or "user"
+                const {id} = req.params;        // Mongo _id string
+                const {role} = req.body;          // "admin" or "user"
 
                 if (!['admin', 'user'].includes(role)) {
-                    return res.status(400).json({ error: 'role must be "admin" or "user"' });
+                    return res.status(400).json({error: 'role must be "admin" or "user"'});
                 }
 
-                const result = await userCollection.updateOne(
-                    { _id: new ObjectId(id) },           // which user?
-                    { $set: { role } }                   // set new role
+                const result = await userCollection.updateOne({_id: new ObjectId(id)},           // which user?
+                    {$set: {role}}                   // set new role
                 );
 
                 if (result.modifiedCount === 1) {
-                    res.json({ message: `Role set to ${role}` });
+                    res.json({message: `Role set to ${role}`});
                 } else {
-                    res.status(404).json({ error: 'User not found' });
+                    res.status(404).json({error: 'User not found'});
                 }
             } catch (err) {
                 console.error(err);
-                res.status(500).json({ error: 'Failed to update role' });
+                res.status(500).json({error: 'Failed to update role'});
             }
         });
 
+        /* ----------  GET /user/role?email=someone@example.com  ---------- *
+   Response:
+     200 → { role: "admin", name: "Alamin", photoURL: "..." }
+     404 → { error: "User not found" }
+     400 → { error: "Email query param required" }
+*/
+        app.get('/user/role', async (req, res) => {
+            try {
+                const email = req.query.email;
+                if (!email) return res.status(400).json({error: 'Email query param required'});
+
+                // Fetch only the fields we need
+                const user = await userCollection.findOne({email}, {
+                    projection: {
+                        _id: 0,
+                        role: 1,
+                        name: 1,
+                    }
+                });
+
+                if (!user) return res.status(404).json({error: 'User not found'});
+
+                res.json(user);           // e.g. { role: "rider", name: "Alamin", photoURL: "..." }
+            } catch (err) {
+                console.error('❌ Error getting role by email:', err);
+                res.status(500).json({error: 'Failed to fetch user role'});
+            }
+        });
+        
         app.get('/parcels', async (req, res) => {
             try {
                 const filter = {};
@@ -145,25 +168,7 @@ async function run() {
         app.post('/parcels', async (req, res) => {
             try {
                 /* ── 1. Basic validation ── */
-                const required = [
-                    'type',
-                    'title',
-                    'senderName',
-                    'senderContact',
-                    'senderEmail',
-                    'senderRegion',
-                    'senderCenter',
-                    'senderAddress',
-                    'pickupInstruction',
-                    'receiverName',
-                    'receiverContact',
-                    'receiverRegion',
-                    'receiverCenter',
-                    'receiverAddress',
-                    'deliveryInstruction',
-                    'createdBy',
-                    'cost'
-                ];
+                const required = ['type', 'title', 'senderName', 'senderContact', 'senderEmail', 'senderRegion', 'senderCenter', 'senderAddress', 'pickupInstruction', 'receiverName', 'receiverContact', 'receiverRegion', 'receiverCenter', 'receiverAddress', 'deliveryInstruction', 'createdBy', 'cost'];
                 const missing = required.filter(k => !req.body?.[k]);
                 if (missing.length) {
                     return res
@@ -174,9 +179,7 @@ async function run() {
                 /* ── 2. Attach server‑trusted timestamps ── */
                 const now = Date.now();                      //Unix (ms)
                 const parcelDoc = {
-                    ...req.body,
-                    createdAtUnix: now,
-                    createdAtISO: new Date(now).toISOString()
+                    ...req.body, createdAtUnix: now, createdAtISO: new Date(now).toISOString()
                 };
 
                 /* ── 3. Save to MongoDB ── */
@@ -184,8 +187,7 @@ async function run() {
 
                 /* ── 4. Respond ── */
                 res.status(201).json({
-                    message: 'Parcel saved successfully.',
-                    insertedId: result.insertedId
+                    message: 'Parcel saved successfully.', insertedId: result.insertedId
                 });
             } catch (err) {
                 console.error('❌  Failed to save parcel:', err);
@@ -246,24 +248,21 @@ async function run() {
         })
 
         app.patch('/riders/:id', async (req, res) => {
-            await ridersCollection.updateOne(
-                { _id: new ObjectId(req.params.id) },
-                { $set: { status: req.body.status } }
-            );
-            res.json({ ok: true });
+            await ridersCollection.updateOne({_id: new ObjectId(req.params.id)}, {$set: {status: req.body.status}});
+            res.json({ok: true});
         });
 
         // GET /riders/pending
         app.get('/riders/pending', async (req, res) => {
             try {
                 const pendingRiders = await ridersCollection
-                    .find({ status: 'pending' })
+                    .find({status: 'pending'})
                     .toArray();
 
                 res.json(pendingRiders);
             } catch (error) {
                 console.error('Error fetching pending riders:', error);
-                res.status(500).json({ error: 'Failed to load pending rider applications' });
+                res.status(500).json({error: 'Failed to load pending rider applications'});
             }
         });
 
@@ -271,13 +270,13 @@ async function run() {
         app.get('/riders/active', async (req, res) => {
             try {
                 const activeRiders = await db.collection('riders')
-                    .find({ status: 'approved' })
+                    .find({status: 'approved'})
                     .toArray();
 
                 res.json(activeRiders);
             } catch (err) {
                 console.error('❌ Error loading active riders:', err);
-                res.status(500).json({ error: 'Failed to fetch active riders' });
+                res.status(500).json({error: 'Failed to fetch active riders'});
             }
         });
 
@@ -285,32 +284,26 @@ async function run() {
         // riders status
         app.patch('/riders/:id/status', async (req, res) => {
             try {
-                const { id } = req.params;
-                const { status, email } = req.body;
-                if (!status) return res.status(400).json({ error: 'Status required' });
+                const {id} = req.params;
+                const {status, email} = req.body;
+                if (!status) return res.status(400).json({error: 'Status required'});
 
-                const result = await ridersCollection.updateOne(
-                    { _id: new ObjectId(id) },
-                    { $set: { status } }
-                );
+                const result = await ridersCollection.updateOne({_id: new ObjectId(id)}, {$set: {status}});
 
                 /* promote user role if rider is approved */
                 if (status === 'approved' && email) {
-                    await userCollection.updateOne(
-                        { email },
-                        { $set: { role: 'rider' } }
-                    );
+                    await userCollection.updateOne({email}, {$set: {role: 'rider'}});
                 }
 
                 if (result.modifiedCount === 1) {
-                    res.json({ message: 'Status updated' });
+                    res.json({message: 'Status updated'});
 
                 } else {
-                    res.status(404).json({ error: 'Rider not found or already updated' });
+                    res.status(404).json({error: 'Rider not found or already updated'});
                 }
             } catch (err) {
                 console.error(err);
-                res.status(500).json({ error: 'Failed to update rider status' });
+                res.status(500).json({error: 'Failed to update rider status'});
             }
         });
 
@@ -344,21 +337,17 @@ async function run() {
 
                 const payResult = await paymentCollection.insertOne(paymentDoc);
 
-                await parcelCollection.updateOne(
-                    {_id: new ObjectId(parcelId)},
-                    {
-                        $set: {
-                            paymentStatus: 'Paid',
-                            paymentAtISO: paymentDoc.createdAtISO,
-                            paymentAtUnix: paymentDoc.createdAtUnix,
-                            paymentId: payResult.insertedId
-                        }
+                await parcelCollection.updateOne({_id: new ObjectId(parcelId)}, {
+                    $set: {
+                        paymentStatus: 'Paid',
+                        paymentAtISO: paymentDoc.createdAtISO,
+                        paymentAtUnix: paymentDoc.createdAtUnix,
+                        paymentId: payResult.insertedId
                     }
-                );
+                });
 
                 res.status(201).json({
-                    message: 'Payment recorded & parcel marked as Paid.',
-                    paymentId: payResult.insertedId
+                    message: 'Payment recorded & parcel marked as Paid.', paymentId: payResult.insertedId
                 });
 
             } catch (err) {
@@ -389,9 +378,7 @@ async function run() {
             const amountInCents = req.body.amountInCents;
             try {
                 const paymentIntent = await stripe.paymentIntents.create({
-                    amount: amountInCents,
-                    currency: 'usd',
-                    payment_method_types: ['card'],
+                    amount: amountInCents, currency: 'usd', payment_method_types: ['card'],
                 });
                 res.json({clientSecret: paymentIntent.client_secret});
             } catch (err) {
