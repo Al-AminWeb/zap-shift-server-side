@@ -56,6 +56,16 @@ async function run() {
             next()
         }
 
+        const verifyAdmin = async (req, res, next) => {
+            const email = req.decoded.email;
+            const query = {email}
+            const user = await userCollection.findOne(query)
+            if(!user||user.role!=='admin') {
+                return res.status(403).send({message: 'forbidden access'});
+            }
+            next();
+        }
+
 
         app.post('/user', async (req, res) => {
             const email = req.body.email;
@@ -89,7 +99,7 @@ async function run() {
             }
         });
 
-        app.patch('/users/:id/role', async (req, res) => {
+        app.patch('/users/:id/role', verifyFBToken,verifyAdmin,async (req, res) => {
             try {
                 const {id} = req.params;        // Mongo _id string
                 const {role} = req.body;          // "admin" or "user"
@@ -141,7 +151,7 @@ async function run() {
                 res.status(500).json({error: 'Failed to fetch user role'});
             }
         });
-        
+
         app.get('/parcels', async (req, res) => {
             try {
                 const filter = {};
@@ -253,7 +263,7 @@ async function run() {
         });
 
         // GET /riders/pending
-        app.get('/riders/pending', async (req, res) => {
+        app.get('/riders/pending',verifyFBToken,verifyAdmin, async (req, res) => {
             try {
                 const pendingRiders = await ridersCollection
                     .find({status: 'pending'})
@@ -267,7 +277,7 @@ async function run() {
         });
 
         // Assuming you're using Express and have connected to MongoDB
-        app.get('/riders/active', async (req, res) => {
+        app.get('/riders/active',verifyFBToken,verifyAdmin, async (req, res) => {
             try {
                 const activeRiders = await db.collection('riders')
                     .find({status: 'approved'})
