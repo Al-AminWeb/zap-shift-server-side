@@ -174,38 +174,69 @@ async function run() {
             }
         });
 
+
+        /* ────────────────────────────────────────────────
+   GET /parcels/unassigned
+   Returns parcels that are paid but not yet collected
+   ──────────────────────────────────────────────── */
+        app.get('/parcels/unassigned', async (req, res) => {
+            try {
+                const filter = {
+                    deliveryStatus: 'Not Collected',
+                    paymentStatus:  'Paid'
+                };
+
+                const parcels = await parcelCollection
+                    .find(filter)
+                    .sort({ createdAtISO: -1 })   // newest first
+                    .toArray();
+
+                res.json(parcels);
+            } catch (err) {
+                console.error('❌ Error fetching unassigned parcels:', err);
+                res.status(500).json({ error: 'Failed to load unassigned parcels.' });
+            }
+        });
+
+
         /* ----------  POST a new parcel  ---------- */
         app.post('/parcels', async (req, res) => {
             try {
-                /* ── 1. Basic validation ── */
-                const required = ['type', 'title', 'senderName', 'senderContact', 'senderEmail', 'senderRegion', 'senderCenter', 'senderAddress', 'pickupInstruction', 'receiverName', 'receiverContact', 'receiverRegion', 'receiverCenter', 'receiverAddress', 'deliveryInstruction', 'createdBy', 'cost'];
+                /* 1️⃣  Basic validation */
+                const required = [
+                    'type','title',
+                    'senderName','senderContact','senderEmail','senderRegion','senderCenter','senderAddress','pickupInstruction',
+                    'receiverName','receiverContact','receiverRegion','receiverCenter','receiverAddress','deliveryInstruction',
+                    'createdBy','cost'
+                ];
                 const missing = required.filter(k => !req.body?.[k]);
                 if (missing.length) {
-                    return res
-                        .status(400)
-                        .json({error: `Missing required fields: ${missing.join(', ')}`});
+                    return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
                 }
 
-                /* ── 2. Attach server‑trusted timestamps ── */
-                const now = Date.now();                      //Unix (ms)
+                /* 2️⃣  Server‑trusted timestamps + default status */
+                const now = Date.now(); // Unix (ms)
                 const parcelDoc = {
-                    ...req.body, createdAtUnix: now, createdAtISO: new Date(now).toISOString()
+                    ...req.body,
+                    deliveryStatus: 'Not Collected',       // ✅ NEW default field
+                    createdAtUnix: now,
+                    createdAtISO: new Date(now).toISOString()
                 };
 
-                /* ── 3. Save to MongoDB ── */
+                /* 3️⃣  Save to MongoDB */
                 const result = await parcelCollection.insertOne(parcelDoc);
 
-                /* ── 4. Respond ── */
+                /* 4️⃣  Respond */
                 res.status(201).json({
-                    message: 'Parcel saved successfully.', insertedId: result.insertedId
+                    message: 'Parcel saved successfully.',
+                    insertedId: result.insertedId
                 });
             } catch (err) {
-                console.error('❌  Failed to save parcel:', err);
-                res
-                    .status(500)
-                    .json({error: 'Something went wrong while saving the parcel.'});
+                console.error('❌ Failed to save parcel:', err);
+                res.status(500).json({ error: 'Something went wrong while saving the parcel.' });
             }
         });
+
 
         /* ---------- GET /parcels — all or by user, sorted by ISO date ---------- */
 
