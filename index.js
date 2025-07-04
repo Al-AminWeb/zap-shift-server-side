@@ -145,7 +145,7 @@ async function run() {
 
                 if (!user) return res.status(404).json({error: 'User not found'});
 
-                res.json(user);           // e.g. { role: "rider", name: "Alamin", photoURL: "..." }
+                res.json(user);           // e.g. { role: "rider", name: "Alain", photoURL: "..." }
             } catch (err) {
                 console.error('❌ Error getting role by email:', err);
                 res.status(500).json({error: 'Failed to fetch user role'});
@@ -223,7 +223,7 @@ async function run() {
                     createdAtISO: new Date(now).toISOString()
                 };
 
-                /* 3️⃣  Save to MongoDB */
+                /* 3️⃣ Save to MongoDB */
                 const result = await parcelCollection.insertOne(parcelDoc);
 
                 /* 4️⃣  Respond */
@@ -320,6 +320,60 @@ async function run() {
                 res.status(500).json({error: 'Failed to fetch active riders'});
             }
         });
+
+
+        /* -------------------------------------------
+   PATCH /parcels/:id/assign
+   body: { riderId: "64e1..." }
+   ------------------------------------------- */
+        /* -------------------------------------------
+    PATCH /parcels/:id/assign
+    body: { riderId: "64e1..." }
+    ------------------------------------------- */
+        app.patch('/parcels/:id/assign', async (req, res) => {
+            try {
+                const parcelId = req.params.id;
+                const { riderId } = req.body;
+
+                if (!riderId) return res.status(400).json({ error: 'riderId is required' });
+
+                /* 1️⃣  confirm rider exists & approved */
+                const rider = await ridersCollection.findOne({
+                    _id: new ObjectId(riderId),
+                    status: 'approved'
+                });
+                if (!rider) return res.status(404).json({ error: 'Rider not found or not approved' });
+
+                const now = Date.now();
+
+                /* 2️⃣  update parcel  (deliveryStatus → in‑transit) */
+                const parcelRes = await parcelCollection.updateOne(
+                    { _id: new ObjectId(parcelId) },
+                    {
+                        $set: {
+                            assignedRiderId: new ObjectId(riderId),
+                            deliveryStatus:  'in-transit',          // 🔸 NEW value
+                            assignedAtISO:   new Date(now).toISOString(),
+                            assignedAtUnix:  now
+                        }
+                    }
+                );
+                if (parcelRes.modifiedCount !== 1)
+                    return res.status(404).json({ error: 'Parcel not found or already assigned' });
+
+                /* 3️⃣  update rider  (workStatus → in‑delivery) */
+                await ridersCollection.updateOne(
+                    { _id: new ObjectId(riderId) },
+                    { $set: { workStatus: 'in-delivery' } }     // 🔸 NEW field
+                );
+
+                res.json({ message: 'Rider assigned and parcel marked in‑transit' });
+            } catch (err) {
+                console.error('❌ Error assigning rider:', err);
+                res.status(500).json({ error: 'Failed to assign rider' });
+            }
+        });
+
 
 
         // riders status
