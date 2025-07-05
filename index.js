@@ -66,6 +66,16 @@ async function run() {
             next();
         }
 
+        const verifyRider = async (req, res, next) => {
+            const email = req.decoded.email;
+            const query = {email}
+            const user = await userCollection.findOne(query)
+            if(!user||user.role!=='rider') {
+                return res.status(403).send({message: 'forbidden access'});
+            }
+            next();
+        }
+
 
         app.post('/user', async (req, res) => {
             const email = req.body.email;
@@ -286,6 +296,51 @@ async function run() {
             }
         });
 
+        app.patch('/parcels/:id/cashout', async (req, res) => {
+            try {
+                const parcelId = req.params.id;
+
+                // Validate ObjectId
+                if (!ObjectId.isValid(parcelId)) {
+                    return res.status(400).json({ error: 'Invalid parcel ID.' });
+                }
+
+                // Fetch the parcel
+                const parcel = await parcelCollection.findOne({ _id: new ObjectId(parcelId) });
+
+                if (!parcel) {
+                    return res.status(404).json({ error: 'Parcel not found.' });
+                }
+
+                if (parcel.cashout_status === 'cashed_out') {
+                    return res.status(409).json({ error: 'Parcel already cashed out.' });
+                }
+
+                // Update parcel with cashout status and timestamp
+                const now = new Date().toISOString();
+                const updateResult = await parcelCollection.updateOne(
+                    { _id: new ObjectId(parcelId) },
+                    {
+                        $set: {
+                            cashout_status: 'cashed_out',
+                            cashed_out_at: now,
+                        }
+                    }
+                );
+
+                if (updateResult.modifiedCount !== 1) {
+                    return res.status(500).json({ error: 'Failed to mark cashout.' });
+                }
+
+                res.json({ message: 'Parcel marked as cashed out.' });
+
+            } catch (error) {
+                console.error('❌ Error during cashout:', error);
+                res.status(500).json({ error: 'Internal server error during cashout.' });
+            }
+        });
+
+
         app.delete('/parcels/:id', async (req, res) => {
             try {
                 const id = req.params.id;
@@ -348,7 +403,7 @@ async function run() {
             }
         });
 
-        app.get('/rider/parcels', verifyFBToken, async (req, res) => {
+        app.get('/rider/parcels', verifyFBToken,verifyRider,async (req, res) => {
             try {
                 const email = req.query.email;
 
@@ -381,6 +436,37 @@ async function run() {
         });
 
 
+        app.get('/rider/completed-parcels',verifyFBToken,verifyRider, async (req, res) => {
+            try {
+                const email = req.query.email;
+
+                if (!email) {
+                    return res.status(400).json({ message: 'Rider email is required' });
+                }
+
+                // ✅ 1. Find the rider
+                const rider = await ridersCollection.findOne({ email });
+                if (!rider) {
+                    return res.status(404).json({ message: 'Rider not found' });
+                }
+
+                // ✅ 2. Find parcels delivered by this rider
+                const query = {
+                    assignedRiderId: rider._id,
+                    deliveryStatus: 'delivered'
+                };
+
+                const parcels = await parcelCollection
+                    .find(query)
+                    .sort({ deliveredAt: -1 })  // newest delivered first
+                    .toArray();
+
+                res.json(parcels);
+            } catch (error) {
+                console.error('❌ Error fetching completed parcels:', error);
+                res.status(500).json({ message: 'Failed to load completed parcels' });
+            }
+        });
 
 
         /* -------------------------------------------
@@ -438,7 +524,7 @@ async function run() {
 
 
         // riders status
-        app.patch('/riders/:id/status', async (req, res) => {
+        app.patch('/riders/:id/status', verifyFBToken,verifyRider,async (req, res) => {
             try {
                 const {id} = req.params;
                 const {status, email} = req.body;
