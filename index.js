@@ -237,6 +237,33 @@ async function run() {
             }
         });
 
+        app.patch("/parcels/:id/status", async (req, res) => {
+            const parcelId = req.params.id;
+            const { status } = req.body;
+
+            const updatedDoc = {
+                deliveryStatus: status  // ✅ Correct field name
+            };
+
+            if (status === 'in_transit') {
+                updatedDoc.pickedAt = new Date().toISOString(); // ✅ Consistent camelCase
+            } else if (status === 'delivered') {
+                updatedDoc.deliveredAt = new Date().toISOString(); // ✅ Consistent camelCase
+            }
+
+            try {
+                const result = await parcelCollection.updateOne(
+                    { _id: new ObjectId(parcelId) },
+                    { $set: updatedDoc }
+                );
+                res.send(result);
+            } catch (error) {
+                console.error("Failed to update status:", error);
+                res.status(500).send({ message: "Failed to update status" });
+            }
+        });
+
+
 
         /* ---------- GET /parcels — all or by user, sorted by ISO date ---------- */
 
@@ -321,6 +348,40 @@ async function run() {
             }
         });
 
+        app.get('/rider/parcels', verifyFBToken, async (req, res) => {
+            try {
+                const email = req.query.email;
+
+                if (!email) {
+                    return res.status(400).send({ message: 'Rider email is required' });
+                }
+
+                // ✅ Step 1: Get Rider by Email
+                const rider = await ridersCollection.findOne({ email });
+                if (!rider) {
+                    return res.status(404).send({ message: 'Rider not found' });
+                }
+
+                // ✅ Step 2: Query by correct ObjectId and camelCase fields
+                const query = {
+                    assignedRiderId: rider._id,
+                    deliveryStatus: { $in: ['rider-assigned', 'in-transit'] }
+                };
+
+                const options = {
+                    sort: { createdAtUnix: -1 } // Use the correct field that exists
+                };
+
+                const parcels = await parcelCollection.find(query, options).toArray();
+                res.send(parcels);
+            } catch (error) {
+                console.error('Error fetching rider tasks:', error);
+                res.status(500).send({ message: 'Failed to get rider tasks' });
+            }
+        });
+
+
+
 
         /* -------------------------------------------
    PATCH /parcels/:id/assign
@@ -337,7 +398,7 @@ async function run() {
 
                 if (!riderId) return res.status(400).json({ error: 'riderId is required' });
 
-                /* 1️⃣  confirm rider exists & approved */
+                /* 1️⃣  confirm rider exists and approved */
                 const rider = await ridersCollection.findOne({
                     _id: new ObjectId(riderId),
                     status: 'approved'
@@ -352,7 +413,7 @@ async function run() {
                     {
                         $set: {
                             assignedRiderId: new ObjectId(riderId),
-                            deliveryStatus:  'in-transit',          // 🔸 NEW value
+                            deliveryStatus:  'rider-assigned',          // 🔸 NEW value
                             assignedAtISO:   new Date(now).toISOString(),
                             assignedAtUnix:  now
                         }
