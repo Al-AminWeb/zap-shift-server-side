@@ -36,6 +36,7 @@ async function run() {
         const parcelCollection = db.collection('parcels');
         const paymentCollection = db.collection('payments');
         const ridersCollection = db.collection('riders');
+        const trackingsCollection = db.collection("tracking");
 
         const verifyFBToken = async (req, res, next) => {
             const authHeader = req.headers.authorization;
@@ -296,6 +297,33 @@ async function run() {
             }
         });
 
+        app.get('/parcels/delivery/status-count', async (req, res) => {
+            const pipeline = [
+                {
+                    $group: {
+                        _id: '$deliveryStatus',
+                        count: {
+                            $sum: 1
+                        }
+                    }
+                },
+                {
+                    $project: {
+                        status: '$_id',
+                        count:1,
+                        _id:0
+                    }
+                }
+            ]
+            const result = await parcelCollection.aggregate(pipeline).toArray();
+            res.send(result);
+
+
+        })
+
+
+
+
         app.patch('/parcels/:id/cashout', async (req, res) => {
             try {
                 const parcelId = req.params.id;
@@ -362,6 +390,57 @@ async function run() {
                 res.status(500).json({error: 'Failed to delete parcel.'});
             }
         });
+
+
+        app.get('/trackings/:id', async (req, res) => {
+            const { id } = req.params;
+
+            /* 1. Validate ObjectId */
+            if (!ObjectId.isValid(id)) {
+                return res.status(400).json({ error: 'Invalid tracking id' });
+            }
+
+            /* 2. Fetch events for this parcel */
+            const events = await trackingsCollection
+                .find({ tracking_id: new ObjectId(id) })
+                .sort({ timestamp: 1 })               // ascending
+                .toArray();
+
+            res.json(events);                       // may be empty []
+        });
+
+        app.post('/trackings', async (req, res) => {
+            const { tracking_id, status, note } = req.body;
+
+            /* 1. Basic validation */
+            if (!tracking_id || !status) {
+                return res
+                    .status(400)
+                    .json({ message: 'tracking_id and status are required.' });
+            }
+            if (!ObjectId.isValid(tracking_id)) {
+                return res.status(400).json({ message: 'Invalid tracking_id.' });
+            }
+
+            /* 2. (Optional) ensure parcel exists */
+            const parcelExists = await parcelCollection.findOne({
+                _id: new ObjectId(tracking_id)
+            });
+            if (!parcelExists)
+                return res.status(404).json({ message: 'Parcel not found.' });
+
+            /* 3. Build & insert event */
+            const event = {
+                tracking_id: new ObjectId(tracking_id),
+                status,
+                note: note || '',
+                timestamp: new Date()
+            };
+
+            const result = await trackingsCollection.insertOne(event);
+            res.status(201).json({ insertedId: result.insertedId });
+        });
+
 
 
         app.post('/riders', async (req, res) => {
